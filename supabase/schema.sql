@@ -10,13 +10,25 @@
 -- 1. 启用 gen_random_uuid() 需要的扩展
 create extension if not exists pgcrypto;
 
--- 2. 创建文档表
+-- 2. 创建目录表 folders（需在 documents 之前，因 documents 有外键引用）
+create table if not exists public.folders (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  created_at timestamptz not null default now()
+);
+
+insert into public.folders (name)
+values ('默认')
+on conflict (name) do nothing;
+
+-- 3. 创建文档表
 -- 注：category_date 存 YYYY-MM 月份，使用 varchar(7)（date 类型无法只精确到月份）
 create table if not exists public.documents (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   client_file_name text not null,
   file_path text not null unique,
+  folder_id uuid not null references public.folders(id),
   category_date varchar(7) not null,
   file_size bigint not null default 0,
   status text not null default '未使用'
@@ -26,6 +38,10 @@ create table if not exists public.documents (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- 按目录+月份查询的索引
+create index if not exists documents_folder_date_idx
+  on public.documents (folder_id, category_date desc);
 
 -- 3. 自动更新时间戳
 create or replace function public.set_updated_at()
@@ -42,6 +58,29 @@ create trigger documents_set_updated_at
 
 -- 4. 开启 RLS 并添加宽松策略（anon 可读可写）
 alter table public.documents enable row level security;
+
+-- folders 的宽松 anon 策略（与 documents 保持一致）
+alter table public.folders enable row level security;
+
+drop policy if exists "anon_folders_select" on public.folders;
+create policy "anon_folders_select"
+  on public.folders for select
+  to anon using (true);
+
+drop policy if exists "anon_folders_insert" on public.folders;
+create policy "anon_folders_insert"
+  on public.folders for insert
+  to anon with check (true);
+
+drop policy if exists "anon_folders_update" on public.folders;
+create policy "anon_folders_update"
+  on public.folders for update
+  to anon using (true) with check (true);
+
+drop policy if exists "anon_folders_delete" on public.folders;
+create policy "anon_folders_delete"
+  on public.folders for delete
+  to anon using (true);
 
 drop policy if exists "anon_documents_select" on public.documents;
 create policy "anon_documents_select"
