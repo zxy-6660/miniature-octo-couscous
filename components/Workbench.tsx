@@ -6,6 +6,11 @@ import type { DocRecord, FolderRecord } from "@/lib/types";
 import UploadZone from "./UploadZone";
 import DocumentReader from "./DocumentReader";
 import MarkUsedModal from "./MarkUsedModal";
+import {
+  getChildren,
+  getDescendantIds,
+  getFolderPath,
+} from "@/lib/tree";
 
 export default function Workbench() {
   const [docs, setDocs] = useState<DocRecord[]>([]);
@@ -39,7 +44,7 @@ export default function Workbench() {
   const loadFolders = useCallback(async () => {
     const { data, error } = await supabase
       .from("folders")
-      .select("id, name, created_at")
+      .select("id, name, parent_id, created_at")
       .order("created_at", { ascending: true });
     if (error) throw error;
     setFolders((data as FolderRecord[]) || []);
@@ -62,6 +67,33 @@ export default function Workbench() {
     () => folders.find((f) => f.id === activeFolderId) || null,
     [folders, activeFolderId]
   );
+
+  // 顶层目录列表
+  const topFolders = useMemo(
+    () => getChildren(folders, null),
+    [folders]
+  );
+
+  // 当前目录的直接子目录
+  const subFolders = useMemo(
+    () => (activeFolderId ? getChildren(folders, activeFolderId) : []),
+    [folders, activeFolderId]
+  );
+
+  // 从根到当前目录的完整路径（面包屑）
+  const folderPath = useMemo(
+    () => getFolderPath(folders, activeFolderId),
+    [folders, activeFolderId]
+  );
+
+  // 每个目录的直接子目录数（用于列表副文案）
+  const childCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const f of folders) {
+      if (f.parent_id) map.set(f.parent_id, (map.get(f.parent_id) || 0) + 1);
+    }
+    return map;
+  }, [folders]);
 
   // 只有当进入某个月份目录后才能上传，上传归入该目录该月份
   const handleUpload = async (files: File[]) => {
@@ -116,7 +148,7 @@ export default function Workbench() {
     }
   };
 
-  const handleCreateFolder = async () => {
+  const handleCreateFolder = async (parentId: string | null) => {
     const name = newFolderName.trim();
     if (!name) {
       setUploadError("请输入目录名称。");
@@ -125,8 +157,8 @@ export default function Workbench() {
     setUploadError("");
     const { data, error } = await supabase
       .from("folders")
-      .insert({ name })
-      .select("id, name, created_at")
+      .insert({ name, parent_id: parentId })
+      .select("id, name, parent_id, created_at")
       .single();
     if (error) {
       setUploadError(error.message);
@@ -139,29 +171,33 @@ export default function Workbench() {
   };
 
   const handleDeleteFolder = async (folder: FolderRecord) => {
-    const folderDocs = docs.filter((d) => d.folder_id === folder.id);
+    // 递归收集该目录及其所有子孙目录
+    const ids = getDescendantIds(folders, folder.id);
+    const folderIds = new Set(ids);
+    const deletedDocs = docs.filter((d) => folderIds.has(d.folder_id));
+    const subCount = ids.length - 1; // 子目录数（不含自身）
     const ok = window.confirm(
-      `确定删除目录「${folder.name}」吗？将同时删除其下 ${folderDocs.length} 篇文档及文件，此操作不可恢复。`
+      `确定删除目录「${folder.name}」吗？将同时删除 ${subCount} 个子目录、${deletedDocs.length} 篇文档及文件，此操作不可恢复。`
     );
     if (!ok) return;
     try {
-      if (folderDocs.length > 0) {
+      if (deletedDocs.length > 0) {
         await supabase.storage
           .from("documents")
-          .remove(folderDocs.map((d) => d.file_path));
+          .remove(deletedDocs.map((d) => d.file_path));
         await supabase
           .from("documents")
           .delete()
-          .eq("folder_id", folder.id);
+          .in("folder_id", ids);
       }
       const { error } = await supabase
         .from("folders")
         .delete()
-        .eq("id", folder.id);
+        .in("id", ids);
       if (error) throw error;
-      if (activeFolderId === folder.id) {
+      if (activeFolderId && ids.includes(activeFolderId)) {
         setActiveDate(null);
-        setActiveFolderId(null);
+        setActiveFolderId(folder.parent_id ?? null);
       }
       await Promise.all([loadFolders(), loadDocs()]);
     } catch (e) {
@@ -279,7 +315,7 @@ export default function Workbench() {
       <header className="mb-6">
         <h1 className="text-2xl font-bold text-zinc-900">📚 工作台</h1>
         <p className="mt-1 text-sm text-zinc-500">
-          管理你的文档：目录 → 月份 → 文档，可在线阅读并标记使用状态。
+          管理你的文档：目录可嵌套多级，仅在叶子目录按月份归档，可在线阅读并标记使用状态。
         </p>
         <div className="mt-4 flex flex-wrap gap-3 text-sm">
           <span className="rounded-full bg-zinc-100 px-3 py-1 text-zinc-700">
@@ -317,13 +353,13 @@ export default function Workbench() {
                 value={newFolderName}
                 onChange={(e) => setNewFolderName(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") handleCreateFolder();
+                  if (e.key === "Enter") handleCreateFolder(null);
                 }}
                 placeholder="例如：项目A / 科室资料"
                 className="w-48 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
               <button
-                onClick={handleCreateFolder}
+                onClick={() => handleCreateFolder(null)}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
               >
                 创建并进入
@@ -335,22 +371,25 @@ export default function Workbench() {
 
           {loading ? (
             <p className="py-10 text-center text-sm text-zinc-500">加载中…</p>
-          ) : folders.length === 0 ? (
+          ) : topFolders.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-12 text-center">
               <p className="text-sm text-zinc-500">还没有任何目录</p>
               <p className="mt-1 text-xs text-zinc-400">
                 在上方输入名称并点击「创建并进入」，即可新建第一个目录。
+                <br />
+                目录可再嵌套子目录，仅叶子目录可建月份、上传文档。
               </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {folders.map((folder) => {
+              {topFolders.map((folder) => {
                 const stat = folderStats.get(folder.id) || {
                   total: 0,
                   unused: 0,
                   used: 0,
                   months: new Set<string>(),
                 };
+                const childCount = childCountMap.get(folder.id) || 0;
                 return (
                   <div
                     key={folder.id}
@@ -371,18 +410,19 @@ export default function Workbench() {
                           {folder.name}
                         </p>
                         <p className="mt-1 text-xs text-zinc-500">
-                          共 {stat.total} 篇 · {stat.months.size} 个月 · 未使用{" "}
-                          {stat.unused} · 已使用 {stat.used}
+                          {childCount > 0
+                            ? `含 ${childCount} 个子目录 · 共 ${stat.total} 篇`
+                            : `叶子目录 · 共 ${stat.total} 篇 · 未使用 ${stat.unused} · 已使用 ${stat.used}`}
                         </p>
                       </div>
                       <span className="mt-1 rounded-lg bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600 group-hover:bg-blue-100 group-hover:text-blue-700">
-                        进入 →
+                        {childCount > 0 ? "进入查看子目录 →" : "进入 →"}
                       </span>
                     </button>
                     <button
                       onClick={() => handleDeleteFolder(folder)}
                       className="rounded-lg px-2 py-1 text-xs font-medium text-zinc-400 hover:text-red-500"
-                      title="删除目录"
+                      title="删除目录（含其所有子目录）"
                     >
                       删除目录
                     </button>
@@ -393,98 +433,249 @@ export default function Workbench() {
           )}
         </main>
       ) : activeFolder && !activeDate ? (
-        /* ============ 视图一：目录内月份列表页 ============ */
+        /* ============ 视图一：目录内（子目录列表 或 月份列表） ============ */
         <main>
-          {/* 面包屑 / 返回目录 */}
-          <div className="mb-4 flex items-center justify-between">
+          {/* 面包屑 */}
+          <div className="mb-4 flex flex-wrap items-center gap-1 text-sm">
             <button
               onClick={() => {
                 setActiveDate(null);
                 setActiveFolderId(null);
               }}
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-500 hover:bg-zinc-100"
+              className="rounded-lg px-2 py-1 font-medium text-zinc-500 hover:bg-zinc-100"
             >
-              ← 返回目录列表
+              ← 根目录
             </button>
-            <h2 className="text-lg font-semibold text-zinc-800">
-              📁 {activeFolder.name}
-            </h2>
-            <span className="text-xs text-zinc-500">
-              {folderMonths.length} 个月
+            {folderPath.map((f) => (
+              <span key={f.id} className="flex items-center gap-1">
+                <span className="text-zinc-300">/</span>
+                <button
+                  onClick={() => {
+                    setActiveDate(null);
+                    setActiveFolderId(f.id);
+                  }}
+                  className={`rounded-lg px-2 py-1 font-medium hover:bg-zinc-100 ${
+                    f.id === activeFolderId
+                      ? "text-zinc-800"
+                      : "text-zinc-500"
+                  }`}
+                >
+                  {f.name}
+                </button>
+              </span>
+            ))}
+            <span className="ml-2 text-xs text-zinc-400">
+              {subFolders.length > 0
+                ? `${subFolders.length} 个子目录`
+                : "叶子目录"}
             </span>
           </div>
 
-          {/* 新建月份并进入 */}
-          <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4">
-            <div>
-              <p className="text-sm font-medium text-zinc-700">
-                新建月份并进入
-              </p>
-              <p className="text-xs text-zinc-500">
-                选择月份后进入该月份即可上传文档（文档将归档到该月份）
-              </p>
-            </div>
-            <div className="ml-auto flex items-center gap-2">
-              <input
-                type="month"
-                value={newDate}
-                onChange={(e) => setNewDate(e.target.value)}
-                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
-              <button
-                onClick={() => setActiveDate(newDate)}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                进入
-              </button>
-            </div>
-          </div>
+          {subFolders.length > 0 ? (
+            /* ---- 非叶子：显示子目录列表 + 新建子目录 ---- */
+            <>
+              <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4">
+                <div>
+                  <p className="text-sm font-medium text-zinc-700">新建子目录</p>
+                  <p className="text-xs text-zinc-500">
+                    在该目录下新建一个子目录，子目录可继续嵌套
+                  </p>
+                </div>
+                <div className="ml-auto flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter")
+                        handleCreateFolder(activeFolderId);
+                    }}
+                    placeholder="子目录名称，例如：项目B"
+                    className="w-48 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                  <button
+                    onClick={() => handleCreateFolder(activeFolderId)}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    创建并进入
+                  </button>
+                </div>
+              </div>
 
-          <h2 className="mb-3 text-sm font-semibold text-zinc-500">
-            「{activeFolder.name}」的月份目录
-          </h2>
-
-          {folderMonths.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-12 text-center">
-              <p className="text-sm text-zinc-500">该目录还没有任何月份</p>
-              <p className="mt-1 text-xs text-zinc-400">
-                选择上方月份并点击「进入」，即可在该月份下上传第一个文档。
-              </p>
-            </div>
+              <h2 className="mb-3 text-sm font-semibold text-zinc-500">
+                「{activeFolder.name}」的子目录
+              </h2>
+              {subFolders.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-12 text-center">
+                  <p className="text-sm text-zinc-500">暂无子目录</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {subFolders.map((sf) => {
+                    const sc = childCountMap.get(sf.id) || 0;
+                    return (
+                      <div
+                        key={sf.id}
+                        className="group flex flex-col items-start gap-3 rounded-2xl border border-zinc-200 bg-white p-5 text-left transition-colors hover:border-blue-400 hover:shadow-sm"
+                      >
+                        <button
+                          onClick={() => {
+                            setActiveDate(null);
+                            setActiveFolderId(sf.id);
+                          }}
+                          className="flex flex-col items-start gap-3 text-left"
+                        >
+                          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-xl group-hover:bg-blue-200">
+                            📁
+                          </span>
+                          <div>
+                            <p className="text-base font-semibold text-zinc-800">
+                              {sf.name}
+                            </p>
+                            <p className="mt-1 text-xs text-zinc-500">
+                              {sc > 0
+                                ? `含 ${sc} 个子目录`
+                                : "叶子目录，可建月份上传文档"}
+                            </p>
+                          </div>
+                          <span className="mt-1 rounded-lg bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600 group-hover:bg-blue-100 group-hover:text-blue-700">
+                            {sc > 0 ? "进入查看子目录 →" : "进入 →"}
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteFolder(sf)}
+                          className="rounded-lg px-2 py-1 text-xs font-medium text-zinc-400 hover:text-red-500"
+                          title="删除（含其所有子目录与文档）"
+                        >
+                          删除目录
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
           ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {folderMonths.map(([date, stat]) => (
-                <button
-                  key={date}
-                  onClick={() => setActiveDate(date)}
-                  className="group flex flex-col items-start gap-3 rounded-2xl border border-zinc-200 bg-white p-5 text-left transition-colors hover:border-blue-400 hover:shadow-sm"
-                >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-xl group-hover:bg-blue-200">
-                    🗂️
-                  </span>
-                  <div>
-                    <p className="text-base font-semibold text-zinc-800">
-                      {formatDate(date)}
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      共 {stat.total} 篇 · 未使用 {stat.unused} · 已使用{" "}
-                      {stat.used}
-                    </p>
-                  </div>
-                  <span className="mt-1 rounded-lg bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600 group-hover:bg-blue-100 group-hover:text-blue-700">
-                    进入 → 上传
-                  </span>
-                </button>
-              ))}
-            </div>
+            /* ---- 叶子：显示月份列表 + 新建月份 + 新建子目录 ---- */
+            <>
+              <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4">
+                <div>
+                  <p className="text-sm font-medium text-zinc-700">新建月份并进入</p>
+                  <p className="text-xs text-zinc-500">
+                    叶子目录下选择月份进入，即可上传文档（按该月份归档）
+                  </p>
+                </div>
+                <div className="ml-auto flex items-center gap-2">
+                  <input
+                    type="month"
+                    value={newDate}
+                    onChange={(e) => setNewDate(e.target.value)}
+                    className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                  <button
+                    onClick={() => setActiveDate(newDate)}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    进入
+                  </button>
+                </div>
+              </div>
+
+              {/* 新建子目录（叶子也可拆分为容器） */}
+              <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-dashed border-zinc-300 bg-white p-4">
+                <div>
+                  <p className="text-sm font-medium text-zinc-700">再建子目录</p>
+                  <p className="text-xs text-zinc-500">
+                    将「{activeFolder.name}」变成容器目录（新建后其上月份不再直接显示）
+                  </p>
+                </div>
+                <div className="ml-auto flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        if (folderMonths.length > 0) {
+                          if (
+                            !window.confirm(
+                              "该目录已有月份/文档，新建子目录后这些月份将不再显示。仍要继续吗？"
+                            )
+                          )
+                            return;
+                        }
+                        handleCreateFolder(activeFolderId);
+                      }
+                    }}
+                    placeholder="子目录名称"
+                    className="w-44 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                  <button
+                    onClick={() => {
+                      if (folderMonths.length > 0) {
+                        if (
+                          !window.confirm(
+                            "该目录已有月份/文档，新建子目录后这些月份将不再显示。仍要继续吗？"
+                          )
+                        )
+                          return;
+                      }
+                      handleCreateFolder(activeFolderId);
+                    }}
+                    className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+                  >
+                    创建子目录
+                  </button>
+                </div>
+              </div>
+
+              <h2 className="mb-3 text-sm font-semibold text-zinc-500">
+                「{activeFolder.name}」的月份目录
+              </h2>
+
+              {folderMonths.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-12 text-center">
+                  <p className="text-sm text-zinc-500">该目录还没有任何月份</p>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    选择上方月份并点击「进入」，即可在该月份下上传第一个文档。
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {folderMonths.map(([date, stat]) => (
+                    <button
+                      key={date}
+                      onClick={() => setActiveDate(date)}
+                      className="group flex flex-col items-start gap-3 rounded-2xl border border-zinc-200 bg-white p-5 text-left transition-colors hover:border-blue-400 hover:shadow-sm"
+                    >
+                      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-xl group-hover:bg-blue-200">
+                        🗂️
+                      </span>
+                      <div>
+                        <p className="text-base font-semibold text-zinc-800">
+                          {formatDate(date)}
+                        </p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          共 {stat.total} 篇 · 未使用 {stat.unused} · 已使用{" "}
+                          {stat.used}
+                        </p>
+                      </div>
+                      <span className="mt-1 rounded-lg bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600 group-hover:bg-blue-100 group-hover:text-blue-700">
+                        进入 → 上传
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </main>
       ) : activeFolder && activeDate ? (
         /* ============ 视图二：月份文档页（可上传） ============ */
         <main>
-          {/* 两级面包屑 */}
+          {/* 完整面包屑 */}
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-1 text-sm">
+            <div className="flex flex-wrap items-center gap-1 text-sm">
               <button
                 onClick={() => {
                   setActiveDate(null);
@@ -492,15 +683,22 @@ export default function Workbench() {
                 }}
                 className="rounded-lg px-2 py-1 font-medium text-zinc-500 hover:bg-zinc-100"
               >
-                ← 目录
+                ← 根目录
               </button>
-              <span className="text-zinc-300">/</span>
-              <button
-                onClick={() => setActiveDate(null)}
-                className="rounded-lg px-2 py-1 font-medium text-zinc-500 hover:bg-zinc-100"
-              >
-                {activeFolder.name}
-              </button>
+              {folderPath.map((f) => (
+                <span key={f.id} className="flex items-center gap-1">
+                  <span className="text-zinc-300">/</span>
+                  <button
+                    onClick={() => {
+                      setActiveDate(null);
+                      setActiveFolderId(f.id);
+                    }}
+                    className="rounded-lg px-2 py-1 font-medium text-zinc-500 hover:bg-zinc-100"
+                  >
+                    {f.name}
+                  </button>
+                </span>
+              ))}
               <span className="text-zinc-300">/</span>
               <span className="rounded-lg px-2 py-1 text-zinc-700">
                 {formatDate(activeDate)}

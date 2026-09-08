@@ -5,6 +5,7 @@ export type DocumentStatus = "未使用" | "已使用";
 export interface FolderRecord {
   id: string;
   name: string; // 目录名称（用户自由输入）
+  parent_id: string | null; // 父目录 id，顶层目录为 null
   created_at: string;
 }
 

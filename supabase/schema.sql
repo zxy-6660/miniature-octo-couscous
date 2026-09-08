@@ -13,13 +13,23 @@ create extension if not exists pgcrypto;
 -- 2. 创建目录表 folders（需在 documents 之前，因 documents 有外键引用）
 create table if not exists public.folders (
   id uuid primary key default gen_random_uuid(),
-  name text not null unique,
+  name text not null,
+  parent_id uuid references public.folders(id), -- 父目录，顶层为 null（支持无限嵌套）
   created_at timestamptz not null default now()
 );
 
 insert into public.folders (name)
 values ('默认')
-on conflict (name) do nothing;
+on conflict (name) where (parent_id is null)
+do nothing;
+
+-- 子目录按父目录查询的索引
+create index if not exists folders_parent_idx
+  on public.folders (parent_id);
+
+-- 同一父目录下名称唯一（顶层以哨牙齿作为父键，允许不同父目录下同名）
+create unique index if not exists folders_parent_name_idx
+  on public.folders (coalesce(parent_id, '00000000-0000-0000-0000-000000000000'::uuid), name);
 
 -- 3. 创建文档表
 -- 注：category_date 存 YYYY-MM 月份，使用 varchar(7)（date 类型无法只精确到月份）
