@@ -155,19 +155,17 @@ export default function Workbench() {
       return;
     }
     setUploadError("");
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("folders")
-      .insert({ name, parent_id: parentId })
-      .select("id, name, parent_id, created_at")
-      .single();
+      .insert({ name, parent_id: parentId });
     if (error) {
       setUploadError(error.message);
       return;
     }
     setNewFolderName("");
     await loadFolders();
+    // 保持在当前视图，不自动进入新创建的目录
     setActiveDate(null);
-    setActiveFolderId(data.id);
   };
 
   const handleDeleteFolder = async (folder: FolderRecord) => {
@@ -355,7 +353,7 @@ export default function Workbench() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleCreateFolder(null);
                 }}
-                placeholder="例如：项目A / 科室资料"
+                placeholder="请输入目录名称！"
                 className="w-48 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
               <button
