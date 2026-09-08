@@ -11,7 +11,6 @@ import {
   getDescendantIds,
   getFolderPath,
 } from "@/lib/tree";
-import { exportFolderStructure } from "@/lib/exportFolderTree";
 
 export default function Workbench() {
   const [docs, setDocs] = useState<DocRecord[]>([]);
@@ -29,6 +28,10 @@ export default function Workbench() {
   const [newFolderName, setNewFolderName] = useState("");
   // 新建目录按钮是否正在提交（用于 loading 反馈）
   const [creatingFolder, setCreatingFolder] = useState(false);
+  // 待确认删除的目录（非 null 时显示删除确认弹窗）
+  const [deleteFolderTarget, setDeleteFolderTarget] = useState<FolderRecord | null>(null);
+  // 删除确认弹窗里的删除是否进行中
+  const [deletingFolder, setDeletingFolder] = useState(false);
   // 新建月份时选择的月份，默认当月
   const [newDate, setNewDate] = useState(
     new Date().toISOString().slice(0, 7)
@@ -221,16 +224,20 @@ export default function Workbench() {
     }
   };
 
-  const handleDeleteFolder = async (folder: FolderRecord) => {
+  // 点击「删除目录」：打开自定义确认弹窗，不弹原生 confirm
+  const handleDeleteFolder = (folder: FolderRecord) => {
+    setDeleteFolderTarget(folder);
+  };
+
+  // 弹窗内点击「确认删除」：真正执行删除
+  const confirmDeleteFolder = async () => {
+    if (!deleteFolderTarget) return;
+    const folder = deleteFolderTarget; // 闭包取当前目标
+    setDeletingFolder(true);
     // 递归收集该目录及其所有子孙目录
     const ids = getDescendantIds(folders, folder.id);
     const folderIds = new Set(ids);
     const deletedDocs = docs.filter((d) => folderIds.has(d.folder_id));
-    const subCount = ids.length - 1; // 子目录数（不含自身）
-    const ok = window.confirm(
-      `确定删除目录「${folder.name}」吗？将同时删除 ${subCount} 个子目录、${deletedDocs.length} 篇文档及文件，此操作不可恢复。`
-    );
-    if (!ok) return;
     try {
       if (deletedDocs.length > 0) {
         await supabase.storage
@@ -250,9 +257,12 @@ export default function Workbench() {
         setActiveDate(null);
         setActiveFolderId(folder.parent_id ?? null);
       }
+      setDeleteFolderTarget(null);
       await Promise.all([loadFolders(), loadDocs()]);
     } catch (e) {
       setUploadError(e instanceof Error ? e.message : "删除目录失败");
+    } finally {
+      setDeletingFolder(false);
     }
   };
 
@@ -319,27 +329,6 @@ export default function Workbench() {
     return map;
   }, [docs]);
 
-  // 导出目录结构为 Excel
-  const handleExport = useCallback(() => {
-    if (folders.length === 0) return;
-    const statsMap = new Map<
-      string,
-      { total: number; unused: number; used: number }
-    >();
-    for (const [id, stat] of folderStats) {
-      statsMap.set(id, {
-        total: stat.total,
-        unused: stat.unused,
-        used: stat.used,
-      });
-    }
-    try {
-      exportFolderStructure(folders, statsMap);
-    } catch (e) {
-      setUploadError(e instanceof Error ? e.message : "导出失败");
-    }
-  }, [folders, folderStats]);
-
   // 当前目录下的月份分组
   const folderMonths = useMemo(() => {
     const list = docs.filter((d) => d.folder_id === activeFolderId);
@@ -385,21 +374,10 @@ export default function Workbench() {
     <div className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
       {/* 头部（始终显示） */}
       <header className="mb-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-zinc-900">📚 工作台</h1>
-            <p className="mt-1 text-sm text-zinc-500">
-              管理你的文档：目录可嵌套多级，仅在叶子目录按月份归档，可在线阅读并标记使用状态。
-            </p>
-          </div>
-          <button
-            onClick={handleExport}
-            disabled={folders.length === 0}
-            className="shrink-0 rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            ⤓ 导出（Excel）
-          </button>
-        </div>
+        <h1 className="text-2xl font-bold text-zinc-900">📚 工作台</h1>
+        <p className="mt-1 text-sm text-zinc-500">
+          管理你的文档：目录可嵌套多级，仅在叶子目录按月份归档，可在线阅读并标记使用状态。
+        </p>
         <div className="mt-4 flex flex-wrap gap-3 text-sm">
           <span className="rounded-full bg-zinc-100 px-3 py-1 text-zinc-700">
             全部 <b className="font-semibold">{docs.length}</b>
@@ -1006,6 +984,48 @@ export default function Workbench() {
           }
         />
       )}
+      {deleteFolderTarget &&
+        (() => {
+          const ids = getDescendantIds(folders, deleteFolderTarget.id);
+          const folderIds = new Set(ids);
+          const docCount = docs.filter((d) =>
+            folderIds.has(d.folder_id)
+          ).length;
+          const subCount = ids.length - 1;
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+              <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+                <h3 className="text-lg font-semibold text-zinc-900">
+                  删除目录
+                </h3>
+                <p className="mt-3 text-sm leading-relaxed text-zinc-600">
+                  确定要删除目录「
+                  <b className="text-zinc-900">{deleteFolderTarget.name}</b>」
+                  吗？将同时删除{" "}
+                  <b className="text-zinc-900">{subCount}</b> 个子目录、
+                  <b className="text-zinc-900">{docCount}</b>{" "}
+                  篇文档及文件，此操作<b className="text-red-600">不可恢复</b>。
+                </p>
+                <div className="mt-6 flex justify-end gap-2">
+                  <button
+                    onClick={() => setDeleteFolderTarget(null)}
+                    disabled={deletingFolder}
+                    className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 disabled:opacity-60"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={confirmDeleteFolder}
+                    disabled={deletingFolder}
+                    className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {deletingFolder ? "删除中…" : "确认删除"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
     </div>
   );
 }
