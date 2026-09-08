@@ -16,7 +16,7 @@ export default function UploadZone({ onUpload, uploading }: UploadZoneProps) {
       if (!fileList || fileList.length === 0) return;
       const docx = Array.from(fileList).filter((f) => {
         const name = f.name.toLowerCase();
-        return name.endsWith(".docx") || name.endsWith(".doc");
+        return name.endsWith(".docx");
       });
       if (docx.length > 0) onUpload(docx);
     },
@@ -45,7 +45,7 @@ export default function UploadZone({ onUpload, uploading }: UploadZoneProps) {
       <input
         ref={inputRef}
         type="file"
-        accept=".docx,.doc"
+        accept=".docx"
         multiple
         className="hidden"
         onChange={(e) => {
@@ -59,7 +59,7 @@ export default function UploadZone({ onUpload, uploading }: UploadZoneProps) {
       <p className="text-base font-medium text-zinc-800">
         {uploading ? "正在上传…" : "点击选择或拖拽上传文档"}
       </p>
-      <p className="mt-1 text-sm text-zinc-500">支持 .docx / .doc 格式，可多选</p>
+      <p className="mt-1 text-sm text-zinc-500">仅支持 .docx 格式</p>
     </div>
   );
 }
