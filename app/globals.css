@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* 文档阅读器样式（mammoth 输出的 HTML） */
+.doc-viewer {
+  line-height: 1.75;
+  font-size: 15px;
+  color: #1f2937;
+  word-break: break-word;
+}
+.doc-viewer h1 {
+  font-size: 1.75em;
+  font-weight: 700;
+  margin: 0.8em 0 0.5em;
+}
+.doc-viewer h2 {
+  font-size: 1.4em;
+  font-weight: 700;
+  margin: 0.8em 0 0.5em;
+}
+.doc-viewer h3 {
+  font-size: 1.2em;
+  font-weight: 600;
+  margin: 0.8em 0 0.5em;
+}
+.doc-viewer h4 {
+  font-size: 1.05em;
+  font-weight: 600;
+  margin: 0.8em 0 0.5em;
+}
+.doc-viewer p {
+  margin: 0.6em 0;
+}
+.doc-viewer img {
+  max-width: 100%;
+  height: auto;
+}
+.doc-viewer table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.6em 0;
+}
+.doc-viewer table td,
+.doc-viewer table th {
+  border: 1px solid #d1d5db;
+  padding: 6px 10px;
+}
+.doc-viewer li {
+  margin: 0.2em 0;
+}
