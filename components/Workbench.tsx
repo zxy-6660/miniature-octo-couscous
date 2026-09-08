@@ -30,6 +30,9 @@ export default function Workbench() {
   const [newDate, setNewDate] = useState(
     new Date().toISOString().slice(0, 7)
   );
+  // 目录搜索：输入值 与 点击后生效的关键词（点按钮才触发过滤）
+  const [folderSearchInput, setFolderSearchInput] = useState("");
+  const [folderSearchQuery, setFolderSearchQuery] = useState("");
 
   const loadDocs = useCallback(async () => {
     const { data, error } = await supabase
@@ -94,6 +97,39 @@ export default function Workbench() {
     }
     return map;
   }, [folders]);
+
+  // 触发一次搜索（点按钮/回车时调用）：
+  // 空关键词则清空搜索；否则把当前输入值设为生效关键词
+  const applyFolderSearch = useCallback(() => {
+    const q = folderSearchInput.trim();
+    if (!q) {
+      setFolderSearchQuery("");
+      return;
+    }
+    setFolderSearchQuery(q);
+  }, [folderSearchInput]);
+
+  // 根据生效关键词过滤目录列表
+  const filterFolders = useCallback(
+    (list: FolderRecord[]) => {
+      if (!folderSearchQuery) return list;
+      const q = folderSearchQuery.toLowerCase();
+      return list.filter((f) => f.name.toLowerCase().includes(q));
+    },
+    [folderSearchQuery]
+  );
+
+  // 搜索后的顶层目录列表
+  const shownTopFolders = useMemo(
+    () => filterFolders(topFolders),
+    [topFolders, filterFolders]
+  );
+
+  // 搜索后的子目录列表
+  const shownSubFolders = useMemo(
+    () => filterFolders(subFolders),
+    [subFolders, filterFolders]
+  );
 
   // 只有当进入某个月份目录后才能上传，上传归入该目录该月份
   const handleUpload = async (files: File[]) => {
@@ -365,11 +401,53 @@ export default function Workbench() {
             </div>
           </div>
 
+          {/* 搜索当前层目录 */}
+          {topFolders.length > 0 && (
+            <div className="mb-4 flex items-center gap-2">
+              <input
+                type="text"
+                value={folderSearchInput}
+                onChange={(e) => setFolderSearchInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") applyFolderSearch();
+                }}
+                placeholder="搜索当前层目录名称…"
+                className="w-64 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+              <button
+                onClick={applyFolderSearch}
+                className="rounded-lg bg-zinc-800 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-900"
+              >
+                搜索
+              </button>
+              {folderSearchQuery && (
+                <button
+                  onClick={() => {
+                    setFolderSearchInput("");
+                    setFolderSearchQuery("");
+                  }}
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-500 hover:bg-zinc-100"
+                >
+                  清除
+                </button>
+              )}
+            </div>
+          )}
+
           <h2 className="mb-3 text-sm font-semibold text-zinc-500">目录列表</h2>
 
           {loading ? (
             <p className="py-10 text-center text-sm text-zinc-500">加载中…</p>
-          ) : topFolders.length === 0 ? (
+          ) : folderSearchQuery && shownTopFolders.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-12 text-center">
+              <p className="text-sm text-zinc-500">
+                没有找到包含「{folderSearchQuery}」的目录
+              </p>
+              <p className="mt-1 text-xs text-zinc-400">
+                请更换关键词，或点「清除」查看全部目录。
+              </p>
+            </div>
+          ) : shownTopFolders.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-12 text-center">
               <p className="text-sm text-zinc-500">还没有任何目录</p>
               <p className="mt-1 text-xs text-zinc-400">
@@ -380,7 +458,7 @@ export default function Workbench() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {topFolders.map((folder) => {
+              {shownTopFolders.map((folder) => {
                 const stat = folderStats.get(folder.id) || {
                   total: 0,
                   unused: 0,
@@ -495,21 +573,63 @@ export default function Workbench() {
                     onClick={() => handleCreateFolder(activeFolderId)}
                     className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                   >
-                    创建并进入
+                    创建
                   </button>
                 </div>
               </div>
 
+              {/* 搜索当前层子目录 */}
+              {subFolders.length > 0 && (
+                <div className="mb-4 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={folderSearchInput}
+                    onChange={(e) => setFolderSearchInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") applyFolderSearch();
+                    }}
+                    placeholder={`搜索「${activeFolder.name}」下子目录…`}
+                    className="w-64 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                  <button
+                    onClick={applyFolderSearch}
+                    className="rounded-lg bg-zinc-800 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-900"
+                  >
+                    搜索
+                  </button>
+                  {folderSearchQuery && (
+                    <button
+                      onClick={() => {
+                        setFolderSearchInput("");
+                        setFolderSearchQuery("");
+                      }}
+                      className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-500 hover:bg-zinc-100"
+                    >
+                      清除
+                    </button>
+                  )}
+                </div>
+              )}
+
               <h2 className="mb-3 text-sm font-semibold text-zinc-500">
                 「{activeFolder.name}」的子目录
               </h2>
-              {subFolders.length === 0 ? (
+              {folderSearchQuery && shownSubFolders.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-12 text-center">
+                  <p className="text-sm text-zinc-500">
+                    没有找到包含「{folderSearchQuery}」的子目录
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    请更换关键词，或点「清除」查看全部子目录。
+                  </p>
+                </div>
+              ) : shownSubFolders.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-12 text-center">
                   <p className="text-sm text-zinc-500">暂无子目录</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {subFolders.map((sf) => {
+                  {shownSubFolders.map((sf) => {
                     const sc = childCountMap.get(sf.id) || 0;
                     return (
                       <div
