@@ -11,6 +11,7 @@ import {
   getDescendantIds,
   getFolderPath,
 } from "@/lib/tree";
+import { exportFolderStructure } from "@/lib/exportFolderTree";
 
 export default function Workbench() {
   const [docs, setDocs] = useState<DocRecord[]>([]);
@@ -318,6 +319,27 @@ export default function Workbench() {
     return map;
   }, [docs]);
 
+  // 导出目录结构为 Excel
+  const handleExport = useCallback(() => {
+    if (folders.length === 0) return;
+    const statsMap = new Map<
+      string,
+      { total: number; unused: number; used: number }
+    >();
+    for (const [id, stat] of folderStats) {
+      statsMap.set(id, {
+        total: stat.total,
+        unused: stat.unused,
+        used: stat.used,
+      });
+    }
+    try {
+      exportFolderStructure(folders, statsMap);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "导出失败");
+    }
+  }, [folders, folderStats]);
+
   // 当前目录下的月份分组
   const folderMonths = useMemo(() => {
     const list = docs.filter((d) => d.folder_id === activeFolderId);
@@ -363,10 +385,21 @@ export default function Workbench() {
     <div className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
       {/* 头部（始终显示） */}
       <header className="mb-6">
-        <h1 className="text-2xl font-bold text-zinc-900">📚 工作台</h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          管理你的文档：目录可嵌套多级，仅在叶子目录按月份归档，可在线阅读并标记使用状态。
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-zinc-900">📚 工作台</h1>
+            <p className="mt-1 text-sm text-zinc-500">
+              管理你的文档：目录可嵌套多级，仅在叶子目录按月份归档，可在线阅读并标记使用状态。
+            </p>
+          </div>
+          <button
+            onClick={handleExport}
+            disabled={folders.length === 0}
+            className="shrink-0 rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            ⤓ 导出（Excel）
+          </button>
+        </div>
         <div className="mt-4 flex flex-wrap gap-3 text-sm">
           <span className="rounded-full bg-zinc-100 px-3 py-1 text-zinc-700">
             全部 <b className="font-semibold">{docs.length}</b>
