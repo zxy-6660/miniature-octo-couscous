@@ -26,6 +26,8 @@ export default function Workbench() {
   const [activeDate, setActiveDate] = useState<string | null>(null);
   // 新建目录时的名称输入
   const [newFolderName, setNewFolderName] = useState("");
+  // 新建目录按钮是否正在提交（用于 loading 反馈）
+  const [creatingFolder, setCreatingFolder] = useState(false);
   // 新建月份时选择的月份，默认当月
   const [newDate, setNewDate] = useState(
     new Date().toISOString().slice(0, 7)
@@ -190,18 +192,32 @@ export default function Workbench() {
       setUploadError("请输入目录名称。");
       return;
     }
+    if (creatingFolder) return; // 防止连点重复提交
     setUploadError("");
-    const { error } = await supabase
-      .from("folders")
-      .insert({ name, parent_id: parentId });
-    if (error) {
-      setUploadError(error.message);
-      return;
+    setCreatingFolder(true);
+    try {
+      // 插入并拿回新行，便于本地即时追加，不等整表刷新
+      const { data, error } = await supabase
+        .from("folders")
+        .insert({ name, parent_id: parentId })
+        .select("id, name, parent_id, created_at")
+        .single();
+      if (error) throw error;
+      setFolders((prev) =>
+        prev.some((f) => f.id === data.id) ? prev : [...prev, data]
+      );
+      setNewFolderName("");
+      // 保持在当前视图，不自动进入新创建的目录
+      setActiveDate(null);
+      // 后台静默兜底校准，不阻塞 UI
+      loadFolders().catch(() => {
+        /* 后台刷新失败不影响已插入的本地目录 */
+      });
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "创建目录失败");
+    } finally {
+      setCreatingFolder(false);
     }
-    setNewFolderName("");
-    await loadFolders();
-    // 保持在当前视图，不自动进入新创建的目录
-    setActiveDate(null);
   };
 
   const handleDeleteFolder = async (folder: FolderRecord) => {
@@ -394,9 +410,10 @@ export default function Workbench() {
               />
               <button
                 onClick={() => handleCreateFolder(null)}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                disabled={creatingFolder}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                创建并进入
+                {creatingFolder ? "创建中…" : "创建并进入"}
               </button>
             </div>
           </div>
@@ -571,9 +588,10 @@ export default function Workbench() {
                   />
                   <button
                     onClick={() => handleCreateFolder(activeFolderId)}
-                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                    disabled={creatingFolder}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    创建
+                    {creatingFolder ? "创建中…" : "创建"}
                   </button>
                 </div>
               </div>
