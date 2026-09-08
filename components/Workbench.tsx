@@ -32,6 +32,23 @@ export default function Workbench() {
   const [deleteFolderTarget, setDeleteFolderTarget] = useState<FolderRecord | null>(null);
   // 删除确认弹窗里的删除是否进行中
   const [deletingFolder, setDeletingFolder] = useState(false);
+  // 通用自定义确认弹窗（用于替换所有原生 confirm）
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    message: string;
+    confirmText?: string;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  // 待重命名的目录
+  const [renameTarget, setRenameTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  // 文档（月份内）搜索关键词
+  const [docSearchQuery, setDocSearchQuery] = useState("");
   // 新建月份时选择的月份，默认当月
   const [newDate, setNewDate] = useState(
     new Date().toISOString().slice(0, 7)
@@ -266,16 +283,65 @@ export default function Workbench() {
     }
   };
 
-  const handleDelete = async (doc: DocRecord) => {
-    const ok = window.confirm(`确定删除「${doc.title}」及其文件吗？`);
-    if (!ok) return;
-    try {
-      await supabase.storage.from("documents").remove([doc.file_path]);
-      await supabase.from("documents").delete().eq("id", doc.id);
-      await loadDocs();
-    } catch (e) {
-      setUploadError(e instanceof Error ? e.message : "删除失败");
+  // 打开重命名弹窗
+  const openRename = (id: string, name: string) => {
+    setRenameTarget({ id, name });
+    setRenameValue(name);
+  };
+
+  // 执行重命名
+  const confirmRename = async () => {
+    if (!renameTarget) return;
+    const name = renameValue.trim();
+    if (!name) {
+      setUploadError("目录名称不能为空。");
+      return;
     }
+    setRenaming(true);
+    try {
+      const { error } = await supabase
+        .from("folders")
+        .update({ name })
+        .eq("id", renameTarget.id);
+      if (error) throw error;
+      setRenameTarget(null);
+      await loadFolders();
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "重命名失败");
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  // 创建子目录：若目录已有月份/文档，先弹自定义确认再继续
+  const attemptCreateSubfolder = () => {
+    if (folderMonths.length > 0) {
+      setConfirmState({
+        title: "提示",
+        message:
+          "该目录已有月份/文档，新建子目录后这些月份将不再显示。仍要继续吗？",
+        onConfirm: () => handleCreateFolder(activeFolderId),
+      });
+      return;
+    }
+    handleCreateFolder(activeFolderId);
+  };
+
+  const handleDelete = (doc: DocRecord) => {
+    setConfirmState({
+      title: "删除文档",
+      message: `确定删除「${doc.title}」及其文件吗？`,
+      confirmText: "删除",
+      onConfirm: async () => {
+        try {
+          await supabase.storage.from("documents").remove([doc.file_path]);
+          await supabase.from("documents").delete().eq("id", doc.id);
+          await loadDocs();
+        } catch (e) {
+          setUploadError(e instanceof Error ? e.message : "删除失败");
+        }
+      },
+    });
   };
 
   const handleMarkUsed = async (
@@ -353,6 +419,15 @@ export default function Workbench() {
       ),
     [docs, activeFolderId, activeDate]
   );
+
+  // 文档列表：按关键词过滤
+  const shownActiveDocs = useMemo(() => {
+    const q = docSearchQuery.trim().toLowerCase();
+    if (!q) return activeDocs;
+    return activeDocs.filter((d) =>
+      (d.title + " " + (d.client_file_name || "")).toLowerCase().includes(q)
+    );
+  }, [activeDocs, docSearchQuery]);
 
   const totalUnused = useMemo(
     () => docs.filter((d) => d.status === "未使用").length,
@@ -524,6 +599,13 @@ export default function Workbench() {
                       </span>
                     </button>
                     <button
+                      onClick={() => openRename(folder.id, folder.name)}
+                      className="rounded-lg px-2 py-1 text-xs font-medium text-zinc-400 hover:text-blue-600"
+                      title="重命名目录"
+                    >
+                      重命名
+                    </button>
+                    <button
                       onClick={() => handleDeleteFolder(folder)}
                       className="rounded-lg px-2 py-1 text-xs font-medium text-zinc-400 hover:text-red-500"
                       title="删除目录（含其所有子目录）"
@@ -690,6 +772,13 @@ export default function Workbench() {
                           </span>
                         </button>
                         <button
+                          onClick={() => openRename(sf.id, sf.name)}
+                          className="rounded-lg px-2 py-1 text-xs font-medium text-zinc-400 hover:text-blue-600"
+                          title="重命名目录"
+                        >
+                          重命名
+                        </button>
+                        <button
                           onClick={() => handleDeleteFolder(sf)}
                           className="rounded-lg px-2 py-1 text-xs font-medium text-zinc-400 hover:text-red-500"
                           title="删除（含其所有子目录与文档）"
@@ -743,15 +832,7 @@ export default function Workbench() {
                     onChange={(e) => setNewFolderName(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
-                        if (folderMonths.length > 0) {
-                          if (
-                            !window.confirm(
-                              "该目录已有月份/文档，新建子目录后这些月份将不再显示。仍要继续吗？"
-                            )
-                          )
-                            return;
-                        }
-                        handleCreateFolder(activeFolderId);
+                        attemptCreateSubfolder();
                       }
                     }}
                     placeholder="子目录名称"
@@ -759,15 +840,7 @@ export default function Workbench() {
                   />
                   <button
                     onClick={() => {
-                      if (folderMonths.length > 0) {
-                        if (
-                          !window.confirm(
-                            "该目录已有月份/文档，新建子目录后这些月份将不再显示。仍要继续吗？"
-                          )
-                        )
-                          return;
-                      }
-                      handleCreateFolder(activeFolderId);
+                      attemptCreateSubfolder();
                     }}
                     className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
                   >
@@ -859,14 +932,41 @@ export default function Workbench() {
           {/* 当前月才可上传 */}
           <UploadZone onUpload={handleUpload} uploading={uploading} />
 
+          {/* 文档搜索 */}
+          {activeDocs.length > 0 && (
+            <div className="mt-4 flex items-center gap-2">
+              <input
+                type="text"
+                value={docSearchQuery}
+                onChange={(e) => setDocSearchQuery(e.target.value)}
+                placeholder="搜索当前月份的文档（标题或文件名）"
+                className="w-72 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+              {docSearchQuery && (
+                <button
+                  onClick={() => setDocSearchQuery("")}
+                  className="rounded-lg px-2 py-2 text-xs font-medium text-zinc-500 hover:text-zinc-800"
+                >
+                  清除
+                </button>
+              )}
+            </div>
+          )}
+
           {/* 当前月份的文档列表 */}
           <div className="mt-6 space-y-2">
-            {activeDocs.length === 0 ? (
-              <p className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-10 text-center text-sm text-zinc-400">
-                「{activeFolder.name} / {formatDate(activeDate)}」为空，请在上方上传你的第一个文档。
-              </p>
+            {shownActiveDocs.length === 0 ? (
+              docSearchQuery.trim() ? (
+                <p className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-10 text-center text-sm text-zinc-400">
+                  没有找到包含「{docSearchQuery.trim()}」的文档。
+                </p>
+              ) : (
+                <p className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-10 text-center text-sm text-zinc-400">
+                  「{activeFolder.name} / {formatDate(activeDate)}」为空，请在上方上传你的第一个文档。
+                </p>
+              )
             ) : (
-              activeDocs.map((doc) => {
+              shownActiveDocs.map((doc) => {
                 const used = doc.status === "已使用";
                 return (
                   <div
@@ -983,6 +1083,80 @@ export default function Workbench() {
             marking ? handleMarkUsed(marking, remark) : Promise.resolve()
           }
         />
+      )}
+      {renameTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-zinc-900">重命名目录</h3>
+            <input
+              autoFocus
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") confirmRename();
+              }}
+              placeholder="输入新的目录名称"
+              className="mt-4 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setRenameTarget(null)}
+                disabled={renaming}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 disabled:opacity-60"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmRename}
+                disabled={renaming}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {renaming ? "保存中…" : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmState && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-zinc-900">
+              {confirmState.title}
+            </h3>
+            <p className="mt-3 text-sm leading-relaxed text-zinc-600">
+              {confirmState.message}
+            </p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmState(null)}
+                disabled={confirmBusy}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 disabled:opacity-60"
+              >
+                取消
+              </button>
+              <button
+                onClick={async () => {
+                  setConfirmBusy(true);
+                  try {
+                    await confirmState.onConfirm();
+                    setConfirmState(null);
+                  } catch (e) {
+                    setUploadError(
+                      e instanceof Error ? e.message : "操作失败"
+                    );
+                  } finally {
+                    setConfirmBusy(false);
+                  }
+                }}
+                disabled={confirmBusy}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {confirmBusy ? "处理中…" : confirmState.confirmText ?? "确定"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {deleteFolderTarget &&
         (() => {
