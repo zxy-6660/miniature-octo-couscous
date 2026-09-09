@@ -49,6 +49,8 @@ export default function Workbench() {
   const [renaming, setRenaming] = useState(false);
   // 文档（月份内）搜索关键词
   const [docSearchQuery, setDocSearchQuery] = useState("");
+  // 文档（月份内）备注搜索关键词
+  const [docNoteQuery, setDocNoteQuery] = useState("");
   // 待编辑文件备注的文档
   const [noteTarget, setNoteTarget] = useState<DocRecord | null>(null);
   const [noteValue, setNoteValue] = useState("");
@@ -450,14 +452,22 @@ export default function Workbench() {
     [docs, activeFolderId, activeDate]
   );
 
-  // 文档列表：按关键词过滤
+  // 文档列表：按文件名 + 备注关键词过滤
   const shownActiveDocs = useMemo(() => {
     const q = docSearchQuery.trim().toLowerCase();
-    if (!q) return activeDocs;
-    return activeDocs.filter((d) =>
-      (d.title + " " + (d.client_file_name || "")).toLowerCase().includes(q)
-    );
-  }, [activeDocs, docSearchQuery]);
+    const nq = docNoteQuery.trim().toLowerCase();
+    return activeDocs.filter((d) => {
+      if (
+        q &&
+        !(d.title + " " + (d.client_file_name || ""))
+          .toLowerCase()
+          .includes(q)
+      )
+        return false;
+      if (nq && !(d.note || "").toLowerCase().includes(nq)) return false;
+      return true;
+    });
+  }, [activeDocs, docSearchQuery, docNoteQuery]);
 
   const totalUnused = useMemo(
     () => docs.filter((d) => d.status === "未使用").length,
@@ -962,22 +972,48 @@ export default function Workbench() {
           {/* 当前月才可上传 */}
           <UploadZone onUpload={handleUpload} uploading={uploading} />
 
-          {/* 文档搜索 */}
+          {/* 文档搜索：按文件名 / 备注 */}
           {activeDocs.length > 0 && (
-            <div className="mt-4 flex items-center gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-2">
               <input
                 type="text"
                 value={docSearchQuery}
                 onChange={(e) => setDocSearchQuery(e.target.value)}
-                placeholder="搜索当前月份的文档（标题或文件名）"
-                className="w-72 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                placeholder="搜索文件名 / 标题"
+                className="w-64 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
-              {docSearchQuery && (
+              {docSearchQuery ? (
                 <button
                   onClick={() => setDocSearchQuery("")}
                   className="rounded-lg px-2 py-2 text-xs font-medium text-zinc-500 hover:text-zinc-800"
                 >
                   清除
+                </button>
+              ) : null}
+              <input
+                type="text"
+                value={docNoteQuery}
+                onChange={(e) => setDocNoteQuery(e.target.value)}
+                placeholder="搜索备注"
+                className="w-48 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+              {docNoteQuery ? (
+                <button
+                  onClick={() => setDocNoteQuery("")}
+                  className="rounded-lg px-2 py-2 text-xs font-medium text-zinc-500 hover:text-zinc-800"
+                >
+                  清除
+                </button>
+              ) : null}
+              {(docSearchQuery || docNoteQuery) && (
+                <button
+                  onClick={() => {
+                    setDocSearchQuery("");
+                    setDocNoteQuery("");
+                  }}
+                  className="rounded-lg px-2 py-2 text-xs font-medium text-blue-600 hover:underline"
+                >
+                  清空全部
                 </button>
               )}
             </div>
@@ -986,9 +1022,9 @@ export default function Workbench() {
           {/* 当前月份的文档列表 */}
           <div className="mt-6 space-y-2">
             {shownActiveDocs.length === 0 ? (
-              docSearchQuery.trim() ? (
+              docSearchQuery.trim() || docNoteQuery.trim() ? (
                 <p className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-10 text-center text-sm text-zinc-400">
-                  没有找到包含「{docSearchQuery.trim()}」的文档。
+                  没有找到匹配的文档。
                 </p>
               ) : (
                 <p className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-10 text-center text-sm text-zinc-400">
@@ -1075,7 +1111,7 @@ export default function Workbench() {
                         )}
                         <button
                           onClick={() => openNote(doc)}
-                          className="rounded-lg bg-blue-600 px-2 py-1.5 text-xs font-medium text-zinc-400 hover:text-blue-600"
+                          className="rounded-lg bg-blue-600 px-2 py-1.5 text-xs font-medium text-zinc-400 hover:text-white"
                           title={doc.note ? "编辑文件备注" : "添加文件备注"}
                         >
                           {doc.note ? "编辑备注" : "备注"}
