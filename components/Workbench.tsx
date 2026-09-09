@@ -417,11 +417,18 @@ export default function Workbench() {
     [docs, activeFolderId, activeDate]
   );
 
-  // 文档列表：按文件名 + 备注关键词过滤
-  const shownActiveDocs = useMemo(() => {
+  // 目录下全部月份文档（用于跨月份搜索）
+  const folderAllDocs = useMemo(
+    () => docs.filter((d) => d.folder_id === activeFolderId),
+    [docs, activeFolderId]
+  );
+
+  // 目录内跨月份搜索结果：按文件名 + 备注关键词过滤
+  const folderSearchResults = useMemo(() => {
     const q = docSearchQuery.trim().toLowerCase();
     const nq = docNoteQuery.trim().toLowerCase();
-    return activeDocs.filter((d) => {
+    if (!q && !nq) return [];
+    return folderAllDocs.filter((d) => {
       if (
         q &&
         !(d.title + " " + (d.client_file_name || ""))
@@ -432,8 +439,18 @@ export default function Workbench() {
       if (nq && !(d.note || "").toLowerCase().includes(nq)) return false;
       return true;
     });
-  }, [activeDocs, docSearchQuery, docNoteQuery]);
+  }, [folderAllDocs, docSearchQuery, docNoteQuery]);
+  const folderSearchActive =
+    docSearchQuery.trim() !== "" || docNoteQuery.trim() !== "";
 
+  // 进入某月份并清空跨月份搜索，展示该月全部文档
+  const enterDate = (date: string) => {
+    setActiveDate(date);
+    setDocSearchQuery("");
+    setDocNoteQuery("");
+  };
+
+  // 状态统计
   const totalUnused = useMemo(
     () => docs.filter((d) => d.status === "未使用").length,
     [docs]
@@ -676,7 +693,7 @@ export default function Workbench() {
                   className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 />
                 <button
-                  onClick={() => setActiveDate(newDate)}
+                  onClick={() => enterDate(newDate)}
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                 >
                   进入
@@ -688,7 +705,99 @@ export default function Workbench() {
               「{activeFolder.name}」的月份目录
             </h2>
 
-            {folderMonths.length === 0 ? (
+            {/* ---- 跨月份搜索：文件名 / 备注 ---- */}
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={docSearchQuery}
+                onChange={(e) => setDocSearchQuery(e.target.value)}
+                placeholder="搜索文件名 / 标题（跨全部月份）"
+                className="w-64 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+              {docSearchQuery ? (
+                <button
+                  onClick={() => setDocSearchQuery("")}
+                  className="rounded-lg px-2 py-2 text-xs font-medium text-zinc-500 hover:text-zinc-800"
+                >
+                  清除
+                </button>
+              ) : null}
+              <input
+                type="text"
+                value={docNoteQuery}
+                onChange={(e) => setDocNoteQuery(e.target.value)}
+                placeholder="搜索备注（跨全部月份）"
+                className="w-48 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+              {docNoteQuery ? (
+                <button
+                  onClick={() => setDocNoteQuery("")}
+                  className="rounded-lg px-2 py-2 text-xs font-medium text-zinc-500 hover:text-zinc-800"
+                >
+                  清除
+                </button>
+              ) : null}
+              {folderSearchActive && (
+                <button
+                  onClick={() => {
+                    setDocSearchQuery("");
+                    setDocNoteQuery("");
+                  }}
+                  className="rounded-lg px-2 py-2 text-xs font-medium text-blue-600 hover:underline"
+                >
+                  清空全部
+                </button>
+              )}
+              {folderSearchActive && (
+                <span className="text-xs text-zinc-400">
+                  找到 {folderSearchResults.length} 篇文档
+                </span>
+              )}
+            </div>
+
+            {folderSearchActive ? (
+              folderSearchResults.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-12 text-center">
+                  <p className="text-sm text-zinc-500">
+                    没有找到匹配的文档。
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {folderSearchResults.map((d) => (
+                    <button
+                      key={d.id}
+                      onClick={() => enterDate(d.category_date)}
+                      className="flex w-full items-center gap-3 rounded-xl border border-zinc-200 bg-white p-4 text-left transition-colors hover:border-blue-400 hover:shadow-sm"
+                    >
+                      <span className="w-20 shrink-0 rounded-lg bg-zinc-100 px-2 py-1 text-center text-xs font-medium text-zinc-600">
+                        {formatDate(d.category_date)}
+                      </span>
+                      <span className="flex-1 truncate text-sm font-medium text-zinc-800">
+                        {d.title}
+                      </span>
+                      {d.note ? (
+                        <span className="shrink-0 rounded-md bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
+                          {d.note}
+                        </span>
+                      ) : null}
+                      <span
+                        className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${
+                          d.status === "已使用"
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-emerald-100 text-emerald-700"
+                        }`}
+                      >
+                        {d.status}
+                      </span>
+                      <span className="shrink-0 text-xs font-medium text-blue-600">
+                        进入 →
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )
+            ) : folderMonths.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-12 text-center">
                 <p className="text-sm text-zinc-500">该目录还没有任何月份</p>
                 <p className="mt-1 text-xs text-zinc-400">
@@ -700,7 +809,7 @@ export default function Workbench() {
                 {folderMonths.map(([date, stat]) => (
                   <button
                     key={date}
-                    onClick={() => setActiveDate(date)}
+                    onClick={() => enterDate(date)}
                     className="group flex flex-col items-start gap-3 rounded-2xl border border-zinc-200 bg-white p-5 text-left transition-colors hover:border-blue-400 hover:shadow-sm"
                   >
                     <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-xl group-hover:bg-blue-200">
@@ -766,67 +875,14 @@ export default function Workbench() {
           {/* 当前月才可上传 */}
           <UploadZone onUpload={handleUpload} uploading={uploading} />
 
-          {/* 文档搜索：按文件名 / 备注 */}
-          {activeDocs.length > 0 && (
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <input
-                type="text"
-                value={docSearchQuery}
-                onChange={(e) => setDocSearchQuery(e.target.value)}
-                placeholder="搜索文件名 / 标题"
-                className="w-64 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
-              {docSearchQuery ? (
-                <button
-                  onClick={() => setDocSearchQuery("")}
-                  className="rounded-lg px-2 py-2 text-xs font-medium text-zinc-500 hover:text-zinc-800"
-                >
-                  清除
-                </button>
-              ) : null}
-              <input
-                type="text"
-                value={docNoteQuery}
-                onChange={(e) => setDocNoteQuery(e.target.value)}
-                placeholder="搜索备注"
-                className="w-48 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
-              {docNoteQuery ? (
-                <button
-                  onClick={() => setDocNoteQuery("")}
-                  className="rounded-lg px-2 py-2 text-xs font-medium text-zinc-500 hover:text-zinc-800"
-                >
-                  清除
-                </button>
-              ) : null}
-              {(docSearchQuery || docNoteQuery) && (
-                <button
-                  onClick={() => {
-                    setDocSearchQuery("");
-                    setDocNoteQuery("");
-                  }}
-                  className="rounded-lg px-2 py-2 text-xs font-medium text-blue-600 hover:underline"
-                >
-                  清空全部
-                </button>
-              )}
-            </div>
-          )}
-
           {/* 当前月份的文档列表 */}
           <div className="mt-6 space-y-2">
-            {shownActiveDocs.length === 0 ? (
-              docSearchQuery.trim() || docNoteQuery.trim() ? (
-                <p className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-10 text-center text-sm text-zinc-400">
-                  没有找到匹配的文档。
-                </p>
-              ) : (
-                <p className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-10 text-center text-sm text-zinc-400">
-                  「{activeFolder.name} / {formatDate(activeDate)}」为空，请在上方上传你的第一个文档。
-                </p>
-              )
+            {activeDocs.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-10 text-center text-sm text-zinc-400">
+                「{activeFolder.name} / {formatDate(activeDate)}」为空，请在上方上传你的第一个文档。
+              </p>
             ) : (
-              shownActiveDocs.map((doc) => {
+              activeDocs.map((doc) => {
                 const used = doc.status === "已使用";
                 return (
                   <div
