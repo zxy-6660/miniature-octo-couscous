@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import mammoth from "mammoth/mammoth.browser";
 import { supabase } from "@/lib/supabase";
 import type { DocRecord, FolderRecord } from "@/lib/types";
 import UploadZone from "./UploadZone";
@@ -55,6 +56,8 @@ export default function Workbench() {
   const [noteTarget, setNoteTarget] = useState<DocRecord | null>(null);
   const [noteValue, setNoteValue] = useState("");
   const [savingNote, setSavingNote] = useState(false);
+  // 正在被 AI 分析的文档 id
+  const [analyzingDocId, setAnalyzingDocId] = useState<string | null>(null);
   // 新建月份时选择的月份，默认当月
   const [newDate, setNewDate] = useState(
     new Date().toISOString().slice(0, 7)
@@ -402,6 +405,50 @@ export default function Workbench() {
       setUploadError(e instanceof Error ? e.message : "保存备注失败");
     } finally {
       setSavingNote(false);
+    }
+  };
+
+  // AI 分析文档用到的技术，并写入该文档的备注
+  const handleAnalyze = async (doc: DocRecord) => {
+    if (analyzingDocId) return; // 防止并发
+    setAnalyzingDocId(doc.id);
+    setUploadError("");
+    try {
+      // 1. 下载 docx
+      const { data, error } = await supabase.storage
+        .from("documents")
+        .download(doc.file_path);
+      if (error || !data) throw error || new Error("文件下载失败");
+      // 2. 提取纯文本
+      const buffer = await data.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+      const text = (result.value || "").trim();
+      if (!text) throw new Error("未能从文档中提取到文本内容");
+
+      // 3. 调用 Edge Function
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+      const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+      const fnResp = await fetch(
+        `${supabaseUrl.replace(/\/$/, "")}/functions/v1/analyze-doc`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${anonKey}`,
+          },
+          body: JSON.stringify({ docId: doc.id, text }),
+        }
+      );
+      const fnData = await fnResp.json();
+      if (!fnResp.ok || !fnData.ok) {
+        throw new Error(fnData.error || "AI 分析失败");
+      }
+      // 4. 刷新列表，展示新备注
+      await loadDocs();
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "AI 分析失败");
+    } finally {
+      setAnalyzingDocId(null);
     }
   };
 
@@ -1109,6 +1156,14 @@ export default function Workbench() {
                             撤销
                           </button>
                         )}
+                        <button
+                          onClick={() => handleAnalyze(doc)}
+                          disabled={analyzingDocId !== null}
+                          className="rounded-lg border border-purple-200 px-3 py-1.5 text-xs font-medium text-purple-600 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          title="AI 分析文档用到的技术"
+                        >
+                          {analyzingDocId === doc.id ? "分析中…" : "AI 分析"}
+                        </button>
                         <button
                           onClick={() => openNote(doc)}
                           className="rounded-lg bg-blue-600 px-2 py-1.5 text-xs font-medium text-white"
