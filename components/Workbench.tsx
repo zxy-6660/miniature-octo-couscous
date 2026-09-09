@@ -1111,7 +1111,7 @@ export default function Workbench() {
                         )}
                         <button
                           onClick={() => openNote(doc)}
-                          className="rounded-lg bg-blue-600 px-2 py-1.5 text-xs font-medium text-zinc-400 hover:text-white"
+                          className="rounded-lg bg-blue-600 px-2 py-1.5 text-xs font-medium text-white"
                           title={doc.note ? "编辑文件备注" : "添加文件备注"}
                         >
                           {doc.note ? "编辑备注" : "备注"}
