@@ -1039,12 +1039,12 @@ export default function Workbench() {
                         </p>
                         {used && doc.remark && (
                           <p className="mt-1 rounded bg-amber-100/70 px-2 py-1 text-xs text-zinc-600">
-                            📌 {doc.remark}
+                            使用处：  {doc.remark}
                           </p>
                         )}
                         {doc.note ? (
                           <p className="mt-1 rounded bg-blue-50 px-2 py-1 text-xs text-zinc-600">
-                            📝 {doc.note}
+                            技术： {doc.note}
                           </p>
                         ) : null}
                       </div>
@@ -1075,7 +1075,7 @@ export default function Workbench() {
                         )}
                         <button
                           onClick={() => openNote(doc)}
-                          className="rounded-lg px-2 py-1.5 text-xs font-medium text-zinc-400 hover:text-blue-600"
+                          className="rounded-lg bg-blue-600 px-2 py-1.5 text-xs font-medium text-zinc-400 hover:text-blue-600"
                           title={doc.note ? "编辑文件备注" : "添加文件备注"}
                         >
                           {doc.note ? "编辑备注" : "备注"}
