@@ -44,6 +44,7 @@ create table if not exists public.documents (
   status text not null default '未使用'
     check (status in ('未使用', '已使用')),
   remark text,
+  note text,
   used_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

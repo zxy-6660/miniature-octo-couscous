@@ -49,8 +49,10 @@ export default function Workbench() {
   const [renaming, setRenaming] = useState(false);
   // 文档（月份内）搜索关键词
   const [docSearchQuery, setDocSearchQuery] = useState("");
-  // 上传时的文件备注
-  const [uploadNote, setUploadNote] = useState("");
+  // 待编辑文件备注的文档
+  const [noteTarget, setNoteTarget] = useState<DocRecord | null>(null);
+  const [noteValue, setNoteValue] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
   // 新建月份时选择的月份，默认当月
   const [newDate, setNewDate] = useState(
     new Date().toISOString().slice(0, 7)
@@ -166,12 +168,6 @@ export default function Workbench() {
     }
     setUploading(true);
     setUploadError("");
-    const note = uploadNote.trim();
-    if (!note) {
-      setUploadError("上传前请填写文件备注。");
-      setUploading(false);
-      return;
-    }
     const savedPaths: string[] = [];
     try {
       for (const file of files) {
@@ -200,12 +196,10 @@ export default function Workbench() {
           category_date: targetDate,
           file_size: file.size,
           status: "未使用",
-          upload_note: note,
         });
         if (dbErr) throw dbErr;
       }
       await loadDocs();
-      setUploadNote(""); // 上传成功后清空备注
     } catch (e) {
       // 清理已上传但未入库的对象
       for (const p of savedPaths) {
@@ -381,6 +375,32 @@ export default function Workbench() {
       return;
     }
     await loadDocs();
+  };
+
+  // 打开文件备注编辑弹窗
+  const openNote = (doc: DocRecord) => {
+    setNoteTarget(doc);
+    setNoteValue(doc.note ?? "");
+  };
+
+  // 保存文件备注（留空则清除）
+  const confirmNote = async () => {
+    if (!noteTarget) return;
+    setSavingNote(true);
+    try {
+      const value = noteValue.trim();
+      const { error } = await supabase
+        .from("documents")
+        .update({ note: value ? value : null })
+        .eq("id", noteTarget.id);
+      if (error) throw error;
+      setNoteTarget(null);
+      await loadDocs();
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "保存备注失败");
+    } finally {
+      setSavingNote(false);
+    }
   };
 
   // 统计每个目录的信息
@@ -940,18 +960,6 @@ export default function Workbench() {
           </div>
 
           {/* 当前月才可上传 */}
-          <div className="mt-4">
-            <label className="mb-1 block text-sm font-medium text-zinc-600">
-              文件备注<span className="text-red-500"> *</span>
-            </label>
-            <input
-              type="text"
-              value={uploadNote}
-              onChange={(e) => setUploadNote(e.target.value)}
-              placeholder="请填写文件备注（必填）"
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
           <UploadZone onUpload={handleUpload} uploading={uploading} />
 
           {/* 文档搜索 */}
@@ -1029,16 +1037,16 @@ export default function Workbench() {
                         <p className="mt-1 text-xs text-zinc-400">
                           {doc.client_file_name} · {formatSize(doc.file_size)}
                         </p>
-                        {doc.upload_note && (
-                          <p className="mt-1 text-xs text-zinc-500">
-                            备注：{doc.upload_note}
-                          </p>
-                        )}
                         {used && doc.remark && (
                           <p className="mt-1 rounded bg-amber-100/70 px-2 py-1 text-xs text-zinc-600">
                             📌 {doc.remark}
                           </p>
                         )}
+                        {doc.note ? (
+                          <p className="mt-1 rounded bg-blue-50 px-2 py-1 text-xs text-zinc-600">
+                            📝 {doc.note}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
 
@@ -1065,6 +1073,13 @@ export default function Workbench() {
                             撤销
                           </button>
                         )}
+                        <button
+                          onClick={() => openNote(doc)}
+                          className="rounded-lg px-2 py-1.5 text-xs font-medium text-zinc-400 hover:text-blue-600"
+                          title={doc.note ? "编辑文件备注" : "添加文件备注"}
+                        >
+                          {doc.note ? "编辑备注" : "备注"}
+                        </button>
                         <button
                           onClick={() => handleDelete(doc)}
                           className="rounded-lg px-2 py-1.5 text-xs font-medium text-zinc-400 hover:text-red-500"
@@ -1140,6 +1155,42 @@ export default function Workbench() {
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {renaming ? "保存中…" : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {noteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-zinc-900">
+              文件备注
+              <span className="ml-2 text-xs font-normal text-zinc-400">
+                {noteTarget.title}
+              </span>
+            </h3>
+            <textarea
+              autoFocus
+              value={noteValue}
+              onChange={(e) => setNoteValue(e.target.value)}
+              placeholder="输入该文件的备注（可留空清除）"
+              rows={4}
+              className="mt-4 w-full resize-none rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setNoteTarget(null)}
+                disabled={savingNote}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 disabled:opacity-60"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmNote}
+                disabled={savingNote}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingNote ? "保存中…" : "保存"}
               </button>
             </div>
           </div>
