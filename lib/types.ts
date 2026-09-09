@@ -19,6 +19,7 @@ export interface DocRecord {
   file_size: number; // 字节
   status: DocumentStatus;
   remark: string | null; // 标记“已使用”时的备注（可空）
+  upload_note: string | null; // 上传时的文件备注（可空/兼容旧数据）
   used_at: string | null; // 标记为已使用的时间
   created_at: string;
   updated_at: string;

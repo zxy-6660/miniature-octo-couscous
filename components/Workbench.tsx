@@ -49,6 +49,8 @@ export default function Workbench() {
   const [renaming, setRenaming] = useState(false);
   // 文档（月份内）搜索关键词
   const [docSearchQuery, setDocSearchQuery] = useState("");
+  // 上传时的文件备注
+  const [uploadNote, setUploadNote] = useState("");
   // 新建月份时选择的月份，默认当月
   const [newDate, setNewDate] = useState(
     new Date().toISOString().slice(0, 7)
@@ -164,6 +166,12 @@ export default function Workbench() {
     }
     setUploading(true);
     setUploadError("");
+    const note = uploadNote.trim();
+    if (!note) {
+      setUploadError("上传前请填写文件备注。");
+      setUploading(false);
+      return;
+    }
     const savedPaths: string[] = [];
     try {
       for (const file of files) {
@@ -192,10 +200,12 @@ export default function Workbench() {
           category_date: targetDate,
           file_size: file.size,
           status: "未使用",
+          upload_note: note,
         });
         if (dbErr) throw dbErr;
       }
       await loadDocs();
+      setUploadNote(""); // 上传成功后清空备注
     } catch (e) {
       // 清理已上传但未入库的对象
       for (const p of savedPaths) {
@@ -930,6 +940,18 @@ export default function Workbench() {
           </div>
 
           {/* 当前月才可上传 */}
+          <div className="mt-4">
+            <label className="mb-1 block text-sm font-medium text-zinc-600">
+              文件备注<span className="text-red-500"> *</span>
+            </label>
+            <input
+              type="text"
+              value={uploadNote}
+              onChange={(e) => setUploadNote(e.target.value)}
+              placeholder="请填写文件备注（必填）"
+              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
           <UploadZone onUpload={handleUpload} uploading={uploading} />
 
           {/* 文档搜索 */}
@@ -1007,6 +1029,11 @@ export default function Workbench() {
                         <p className="mt-1 text-xs text-zinc-400">
                           {doc.client_file_name} · {formatSize(doc.file_size)}
                         </p>
+                        {doc.upload_note && (
+                          <p className="mt-1 text-xs text-zinc-500">
+                            备注：{doc.upload_note}
+                          </p>
+                        )}
                         {used && doc.remark && (
                           <p className="mt-1 rounded bg-amber-100/70 px-2 py-1 text-xs text-zinc-600">
                             📌 {doc.remark}
