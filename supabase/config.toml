@@ -1,6 +1,0 @@
-# Supabase 本地/部署配置（用于 Edge Function analyze-doc 的 CLI 部署）
-# 项目参考 ID 需与你的 Supabase 项目一致
-project_id = "ofkqwflpndeolbwnpuw"
-
-[functions.analyze-doc]
-verify_jwt = false
